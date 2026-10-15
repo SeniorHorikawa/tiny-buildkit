@@ -81,15 +81,17 @@ def omvll_get_config() -> omvll.ObfuscationConfig:
         omvll.config.probability_seed = SEED
     if LEVEL >= 3:
         omvll.config.pass_phases = {
-            omvll.Pass.AntiHook: {omvll.Phase.Last},
-            omvll.Pass.FunctionOutline: {omvll.Phase.Last},
+            omvll.Pass.AntiHook: {omvll.Phase.Early},
+            omvll.Pass.FunctionOutline: {omvll.Phase.Early},
             omvll.Pass.StringEncoding: {omvll.Phase.Early, omvll.Phase.Last},
-            omvll.Pass.OpaqueFieldAccess: {omvll.Phase.Last},
-            omvll.Pass.BasicBlockDuplicate: {omvll.Phase.Last},
-            omvll.Pass.ControlFlowFlattening: {omvll.Phase.Last},
-            omvll.Pass.BreakControlFlow: {omvll.Phase.Last},
-            omvll.Pass.OpaqueConstants: {omvll.Phase.Last},
-            omvll.Pass.Arithmetic: {omvll.Phase.Last},
+            omvll.Pass.OpaqueFieldAccess: {omvll.Phase.Early},
+            omvll.Pass.BasicBlockSplit: {omvll.Phase.Early},
+            omvll.Pass.ShuffleOps: {omvll.Phase.Early},
+            omvll.Pass.BasicBlockDuplicate: {omvll.Phase.Early},
+            omvll.Pass.ControlFlowFlattening: {omvll.Phase.Early},
+            omvll.Pass.BreakControlFlow: {omvll.Phase.Early},
+            omvll.Pass.OpaqueConstants: {omvll.Phase.Early},
+            omvll.Pass.Arithmetic: {omvll.Phase.Early},
             omvll.Pass.IndirectCall: {omvll.Phase.Last},
             omvll.Pass.IndirectBranch: {omvll.Phase.Last},
         }
