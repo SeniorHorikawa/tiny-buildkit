@@ -19,6 +19,10 @@ on:
         description: "on / off"
         required: false
         default: "on"
+      obf_level:
+        description: "1 / 2 / 3"
+        required: false
+        default: "3"
       release_tag:
         description: "tag"
         required: false
@@ -35,6 +39,7 @@ env:
   GRADLE_USER_HOME: ${{ github.workspace }}/.gradle
   OLLVM_DIR: ${{ github.workspace }}/.toolchain
   TOOLCHAIN_TAG: toolchain
+  OBF_LEVEL: ${{ inputs.obf_level }}
 
 jobs:
   build:
