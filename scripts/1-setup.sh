@@ -14,15 +14,15 @@ fi
 
 echo "::add-mask::$repo"
 
-level="${INPUT_OBFUSCATION:-max}"
+level="${INPUT_OBFUSCATION:-on}"
 case "$level" in
-  max|balanced|off) ;;
+  on|off) ;;
   *) echo "::error::invalid obfuscation: $level" >&2; exit 1 ;;
 esac
 
-branch="${INPUT_OLLVM_BRANCH:-llvm-12.x}"
-if [[ ! "$branch" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-  echo "::error::invalid branch" >&2
+ver="${INPUT_TOOLCHAIN_VERSION:-1.11.0}"
+if [[ ! "$ver" =~ ^[0-9A-Za-z._-]+$ ]]; then
+  echo "::error::invalid toolchain version" >&2
   exit 1
 fi
 
@@ -38,6 +38,7 @@ fi
   echo "SOURCE_REPO=$repo"
   echo "SOURCE_REF=${INPUT_SOURCE_REF:-}"
   echo "OBFUSCATION=$level"
+  echo "TOOLCHAIN_VERSION=$ver"
   echo "INPUT_RELEASE_TAG=${INPUT_RELEASE_TAG:-}"
 } >> "$GITHUB_ENV"
 

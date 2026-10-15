@@ -11,21 +11,21 @@ on:
         description: "ref"
         required: false
         default: ""
-      ollvm_branch:
-        description: "llvm-12.x"
+      toolchain_version:
+        description: "toolchain version"
         required: false
-        default: "llvm-12.x"
+        default: "1.11.0"
       obfuscation:
-        description: "max / balanced / off"
+        description: "on / off"
         required: false
-        default: "max"
+        default: "on"
       release_tag:
         description: "tag"
         required: false
         default: ""
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build
@@ -34,7 +34,7 @@ concurrency:
 env:
   GRADLE_USER_HOME: ${{ github.workspace }}/.gradle
   OLLVM_DIR: ${{ github.workspace }}/.toolchain
-  TOOLCHAIN_TAG: ollvm-toolchain
+  TOOLCHAIN_TAG: toolchain
 
 jobs:
   build:
@@ -43,7 +43,7 @@ jobs:
     env:
       INPUT_SOURCE_REPO: ${{ inputs.source_repo }}
       INPUT_SOURCE_REF: ${{ inputs.source_ref }}
-      INPUT_OLLVM_BRANCH: ${{ inputs.ollvm_branch }}
+      INPUT_TOOLCHAIN_VERSION: ${{ inputs.toolchain_version }}
       INPUT_OBFUSCATION: ${{ inputs.obfuscation }}
       INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
@@ -74,7 +74,7 @@ jobs:
 
       - name: Toolchain
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.SRC_TOKEN || secrets.Actions }}
         run: bash scripts/3-toolchain.sh
 
       - name: Build

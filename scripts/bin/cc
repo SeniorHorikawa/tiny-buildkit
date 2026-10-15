@@ -7,23 +7,17 @@ fi
 shift
 
 : "${OLLVM_DIR:?}"
-clang="$OLLVM_DIR/bin/clang"
-if [[ ! -x "$clang" ]]; then
+clang="$(find "$OLLVM_DIR/bin" -maxdepth 1 \( -name clang -o -name 'clang-[0-9]*' \) | head -1)"
+plugin="$OLLVM_DIR/omvll_linux.so"
+if [[ ! -x "$clang" || ! -f "$plugin" ]]; then
   exit 2
 fi
 
-level="${OBFUSCATION:-max}"
-flags=()
-if [[ "$level" != "off" ]]; then
-  flags_file="$OLLVM_DIR/flags-$level.txt"
-  if [[ -s "$flags_file" ]]; then
-    mapfile -t flags < "$flags_file"
-  fi
+args=()
+if [[ "${OBFUSCATION:-on}" != "off" ]]; then
+  export OMVLL_CONFIG="$OLLVM_DIR/policy.py"
+  args+=("-fpass-plugin=$plugin")
 fi
 
-exec "$clang" \
-  -fuse-ld=lld \
-  -B "$OLLVM_DIR/bin" \
-  -Wno-unused-command-line-argument \
-  "${flags[@]+"${flags[@]}"}" \
-  "$@"
+exec "$clang" ${args[@]+"${args[@]}"} -fuse-ld=lld -B "$OLLVM_DIR/bin" \
+  -Wno-unused-command-line-argument "$@"

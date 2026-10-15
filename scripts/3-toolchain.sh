@@ -1,76 +1,74 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BRANCH="${OLLVM_BRANCH:-llvm-12.x}"
+VER="${TOOLCHAIN_VERSION:-1.11.0}"
 DEST="${OLLVM_DIR:?}"
-SRC_URL="https://github.com/heroims/obfuscator"
-GH_REPO="${GITHUB_REPOSITORY:?}"
-TAG="${TOOLCHAIN_TAG:-ollvm-toolchain}"
-
-sha="$(git ls-remote "$SRC_URL" "refs/heads/$BRANCH" 2>/dev/null | awk '{print $1}')"
-if [[ -z "$sha" ]]; then
-  echo "::error::cannot resolve branch $BRANCH" >&2
-  exit 1
-fi
-ASSET="ollvm-${BRANCH}-${sha}.tar.zst"
+CACHE_REPO="${SOURCE_REPO:?}"
+TAG="${TOOLCHAIN_TAG:-toolchain}"
+ASSET="toolchain-${VER}-linux.tar.gz"
+PLUGIN_REPO="open-obfuscator/o-mvll"
 
 tmp="$(mktemp -d)"
 mkdir -p "$(dirname "$DEST")"
 
-if gh release download "$TAG" --repo "$GH_REPO" --pattern "$ASSET" --dir "$tmp" --clobber >/dev/null 2>&1; then
+if gh release download "$TAG" --repo "$CACHE_REPO" --pattern "$ASSET" --dir "$tmp" --clobber >/dev/null 2>&1; then
   mkdir -p "$DEST"
-  tar --zstd -xf "$tmp/$ASSET" -C "$DEST"
+  tar -xzf "$tmp/$ASSET" -C "$DEST"
   echo "toolchain: cache hit"
   exit 0
 fi
 
-if ! (
-  set -euo pipefail
-  sudo apt-get update -qq
-  sudo apt-get install -y -qq ninja-build zstd ccache
-  mkdir -p "$tmp/src"
-  curl -fsSL "https://codeload.github.com/heroims/obfuscator/tar.gz/refs/heads/$BRANCH" -o "$tmp/src.tar.gz"
-  tar -xzf "$tmp/src.tar.gz" -C "$tmp/src" --strip-components=1
-  cmake -S "$tmp/src/llvm" -B "$tmp/build" -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX="$tmp/install" \
-    -DLLVM_ENABLE_PROJECTS="clang;lld" \
-    -DLLVM_TARGETS_TO_BUILD="AArch64" \
-    -DLLVM_INCLUDE_TESTS=OFF \
-    -DLLVM_INCLUDE_EXAMPLES=OFF \
-    -DLLVM_INCLUDE_DOCS=OFF \
-    -DLLVM_INCLUDE_BENCHMARKS=OFF \
-    -DLLVM_ENABLE_ASSERTIONS=OFF \
-    -DLLVM_ENABLE_TERMINFO=OFF \
-    -DLLVM_ENABLE_ZLIB=OFF \
-    -DLLVM_ENABLE_LIBXML2=OFF \
-    -DLLVM_ENABLE_BINDINGS=OFF \
-    -DLLVM_ENABLE_OCAMLDOC=OFF \
-    -DLLVM_INSTALL_TOOLCHAIN_ONLY=ON \
-    -DLLVM_BUILD_LLVM_DYLIB=OFF \
-    -DLLVM_CCACHE_BUILD=ON
-  ninja -C "$tmp/build" install
-) >"$tmp/build.log" 2>&1; then
-  echo "::error::toolchain build failed" >&2
-  tail -n 20 "$tmp/build.log" | sed -E 's/[A-Za-z0-9_.:\/-]{64,}/[redacted]/g' >&2 || true
+work="$tmp/work"
+mkdir -p "$work"
+
+PLUGIN_URL="$(curl -fsSL "https://api.github.com/repos/$PLUGIN_REPO/releases/tags/$VER" \
+  | grep -oE 'https://[^"]*linux[^"]*\.tar\.gz' | head -1)"
+if [[ -z "$PLUGIN_URL" ]]; then
+  echo "::error::plugin release not found: $VER" >&2
+  exit 1
+fi
+curl -fsSL "$PLUGIN_URL" -o "$work/plugin.tar.gz"
+tar -xzf "$work/plugin.tar.gz" -C "$work"
+
+NDK_URL=""
+for v in r29d r29c r29b r29; do
+  u="https://dl.google.com/android/repository/android-ndk-$v-linux.zip"
+  if curl -fsI "$u" >/dev/null 2>&1; then
+    NDK_URL="$u"
+    break
+  fi
+done
+if [[ -z "$NDK_URL" ]]; then
+  echo "::error::no NDK package available" >&2
+  exit 1
+fi
+curl -fsSL "$NDK_URL" -o "$work/ndk.zip"
+unzip -q "$work/ndk.zip" -d "$work/ndk" \
+  "*/toolchains/llvm/prebuilt/linux-x86_64/bin/*" \
+  "*/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*" \
+  "*/toolchains/llvm/prebuilt/linux-x86_64/lib64/*"
+
+LLVM_ROOT="$(find "$work/ndk" -type d -path '*/toolchains/llvm/prebuilt/linux-x86_64' | head -1)"
+if [[ -z "$LLVM_ROOT" ]]; then
+  echo "::error::NDK layout unexpected" >&2
   exit 1
 fi
 
-if ! (
-  set -euo pipefail
-  keep="$tmp/keep"
-  mkdir -p "$keep/bin" "$keep/lib"
-  shopt -s nullglob
-  for f in "$tmp/install/bin"/clang* "$tmp/install/bin"/lld*; do
-    cp -a "$f" "$keep/bin/"
-  done
-  cp -a "$tmp/install/lib/clang" "$keep/lib/"
+keep="$work/keep"
+mkdir -p "$keep/bin" "$keep/lib"
+cp -a "$LLVM_ROOT/bin/." "$keep/bin/" 2>/dev/null || true
+cp -a "$LLVM_ROOT/lib/clang" "$keep/lib/" 2>/dev/null || true
+if [[ -d "$LLVM_ROOT/lib64" ]]; then
+  mkdir -p "$keep/lib64"
+  cp -a "$LLVM_ROOT/lib64/." "$keep/lib64/" 2>/dev/null || true
+fi
+mv "$work"/omvll_linux.so "$keep/" 2>/dev/null || true
+cp "$GITHUB_WORKSPACE/scripts/policy.py" "$keep/policy.py"
 
-  if [[ -x "$tmp/install/bin/llvm-strip" ]]; then
-    find "$keep/bin" -type f -exec "$tmp/install/bin/llvm-strip" --strip-all {} + 2>/dev/null || true
-  fi
+find "$keep/bin" -maxdepth 1 -type f ! -name 'clang*' ! -name 'lld*' ! -name 'ld.lld*' -delete 2>/dev/null || true
+find "$keep/bin" -maxdepth 1 -type l ! -name 'clang*' ! -name 'lld*' ! -name 'ld.lld*' -delete 2>/dev/null || true
 
-  cat > "$tmp/t.c" <<'EOF'
+cat > "$work/t.c" <<'EOF'
 int f(int a) {
     int s = 0;
     for (int i = 0; i < a; i++) {
@@ -82,58 +80,39 @@ int f(int a) {
 }
 EOF
 
-  try_flag() {
-    local flag="$1" out
-    if ! out="$("$keep/bin/clang" -c -O1 -target aarch64-linux-android -nostdlib -ffreestanding \
-        -mllvm "$flag" "$tmp/t.c" -o "$tmp/t.o" 2>&1)"; then
-      return 1
-    fi
-    if printf '%s' "$out" | grep -qiE "unknown (command line )?argument"; then
-      return 1
-    fi
-    return 0
-  }
-  collect() {
-    local f
-    for f in "$@"; do
-      if try_flag "$f"; then printf '%s\n' "-mllvm" "$f"; fi
-    done
-  }
-  collect fla bcf bcf_prob=100 bcf_loop=3 sub sub_loop=3 sub_prob=100 split split_num=3 sobf \
-    > "$keep/flags-max.txt"
-  collect fla bcf bcf_prob=70 sub > "$keep/flags-balanced.txt"
-
-  "$keep/bin/clang" -c -O1 -target aarch64-linux-android -nostdlib -ffreestanding \
-      "$tmp/t.c" -o "$tmp/plain.o" 2>/dev/null
-  mapfile -t maxflags < "$keep/flags-max.txt"
-  "$keep/bin/clang" -c -O1 -target aarch64-linux-android -nostdlib -ffreestanding \
-      "${maxflags[@]+"${maxflags[@]}"}" "$tmp/t.c" -o "$tmp/obf.o" 2>/dev/null
-  plain="$(stat -c%s "$tmp/plain.o")"
-  obf="$(stat -c%s "$tmp/obf.o")"
-  if (( obf <= plain )); then
-    echo "obfuscation inactive" >&2
-    exit 1
-  fi
-
-  "$keep/bin/clang" -shared -nostdlib -ffreestanding -O2 -fPIC -fvisibility=hidden \
-      -target aarch64-linux-android "${maxflags[@]+"${maxflags[@]}"}" \
-      -fuse-ld=lld -B "$keep/bin" \
-      -Wl,--no-undefined -Wl,-s -Wl,-z,max-page-size=16384 \
-      "$tmp/t.c" -o "$tmp/smoke.so" 2>/dev/null
-  file "$tmp/smoke.so" | grep -q AArch64 || exit 1
-
-  tar --zstd -cf "$tmp/$ASSET" -C "$keep" .
-); then
-  echo "::error::toolchain assembly failed" >&2
+CF="$(find "$keep/bin" -maxdepth 1 \( -name clang -o -name 'clang-[0-9]*' \) | head -1)"
+if [[ -z "$CF" ]]; then
+  echo "::error::clang missing in toolchain" >&2
+  exit 1
+fi
+if [[ ! -f "$keep/omvll_linux.so" ]]; then
+  echo "::error::plugin missing" >&2
   exit 1
 fi
 
-if ! gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
-  gh release create "$TAG" --repo "$GH_REPO" \
-    --title "toolchain cache" --notes "cache" >/dev/null 2>&1 || true
+"$CF" -c -O2 -target aarch64-linux-android -nostdlib -ffreestanding "$work/t.c" -o "$work/plain.o" 2>/dev/null
+if ! OMVLL_CONFIG="$keep/policy.py" "$CF" -c -O2 -fpass-plugin="$keep/omvll_linux.so" \
+      -target aarch64-linux-android -nostdlib -ffreestanding "$work/t.c" -o "$work/obf.o" 2>"$work/obf.err"; then
+  echo "::error::plugin load failed" >&2
+  tail -n 8 "$work/obf.err" >&2 || true
+  exit 1
 fi
-gh release upload "$TAG" --repo "$GH_REPO" --clobber "$tmp/$ASSET" >/dev/null 2>&1 || true
+
+plain="$(stat -c%s "$work/plain.o")"
+obf="$(stat -c%s "$work/obf.o")"
+if (( obf <= plain )); then
+  echo "::error::obfuscation inactive (plain=$plain obf=$obf)" >&2
+  tail -n 8 "$work/obf.err" >&2 || true
+  exit 1
+fi
+
+tar -czf "$tmp/$ASSET" -C "$keep" .
+
+if ! gh release view "$TAG" --repo "$CACHE_REPO" >/dev/null 2>&1; then
+  gh release create "$TAG" --repo "$CACHE_REPO" --title "toolchain cache" --notes "cache" >/dev/null 2>&1 || true
+fi
+gh release upload "$TAG" --repo "$CACHE_REPO" --clobber "$tmp/$ASSET" >/dev/null 2>&1 || true
 
 mkdir -p "$DEST"
-tar --zstd -xf "$tmp/$ASSET" -C "$DEST"
+tar -xzf "$tmp/$ASSET" -C "$DEST"
 echo "toolchain ok"

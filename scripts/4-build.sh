@@ -2,9 +2,8 @@
 set -euo pipefail
 
 src="${1:?usage: 4-build.sh <dir>}"
-level="${OBFUSCATION:-max}"
-
-if [[ "$level" != "off" && ! -s "$OLLVM_DIR/flags-$level.txt" ]]; then
+clang_bin="$(find "$OLLVM_DIR/bin" -maxdepth 1 \( -name clang -o -name 'clang-[0-9]*' \) | head -1)"
+if [[ -z "$clang_bin" ]]; then
   echo "::error::toolchain not ready" >&2
   exit 1
 fi
