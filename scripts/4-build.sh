@@ -34,8 +34,10 @@ set -e
 if [[ "$rc" -ne 0 ]]; then
   echo "::error::build failed (exit $rc)" >&2
   grep -E '^> Task |^FAILURE|^Execution failed|^BUILD FAILED|^\* Try|^\* Where|^\* What went wrong' "$log" 2>/dev/null \
-    | tail -n 25 \
-    | sed -E 's/[A-Za-z0-9_.:\/+=-]{48,}/[redacted]/g' >&2 || true
+    | tail -n 20 >&2 || true
+  echo "----- details (filtered) -----" >&2
+  tail -n 45 "$log" 2>/dev/null \
+    | sed -E 's#[A-Za-z0-9_./-]+\.(c|h|cc|cpp|hpp|java|kt|kts|py|sh)(:[0-9]+)+#<file:line>#g; s#[A-Za-z0-9_./-]+\.(c|h|cc|cpp|hpp|java|kt|kts|py|sh)#<file>#g; s#^[[:space:]]*[0-9]+ \|.*$#<src>#; s#^[[:space:]]*\|.*$#<src>#; s#lib[A-Za-z0-9_]+\.so#<lib>#g; s#[A-Za-z0-9_.:+/=-]{48,}#[redacted]#g' >&2 || true
   exit "$rc"
 fi
 
