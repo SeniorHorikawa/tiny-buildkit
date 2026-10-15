@@ -2,3 +2,5 @@
 .gradle/
 src/
 .workbuddy/
+__pycache__/
+*.pyc
