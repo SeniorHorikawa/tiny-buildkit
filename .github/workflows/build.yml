@@ -69,6 +69,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Mask source literals
+        run: bash scripts/2-mask.sh src
+
       - name: Dependencies
         run: bash scripts/2-deps.sh src
 
