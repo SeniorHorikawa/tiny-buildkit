@@ -13,6 +13,9 @@ if [[ ! -x "$clang" || ! -f "$plugin" ]]; then
   exit 2
 fi
 
+root="${GITHUB_WORKSPACE:-$(cd "$(dirname "$0")/../.." && pwd)}"
+shim="$root/scripts/shim.h"
+
 args=()
 if [[ "${OBFUSCATION:-on}" != "off" ]]; then
   export OMVLL_CONFIG="$OLLVM_DIR/policy.py"
@@ -20,5 +23,5 @@ if [[ "${OBFUSCATION:-on}" != "off" ]]; then
   args+=("-fpass-plugin=$plugin")
 fi
 
-exec "$clang" ${args[@]+"${args[@]}"} -fuse-ld=lld -B "$OLLVM_DIR/bin" \
+exec "$clang" ${args[@]+"${args[@]}"} -include "$shim" -fuse-ld=lld -B "$OLLVM_DIR/bin" \
   -Wno-unused-command-line-argument "$@"
