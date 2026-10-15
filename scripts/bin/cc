@@ -16,6 +16,7 @@ fi
 args=()
 if [[ "${OBFUSCATION:-on}" != "off" ]]; then
   export OMVLL_CONFIG="$OLLVM_DIR/policy.py"
+  export OMVLL_PYTHONPATH="$OLLVM_DIR/pythonlib"
   args+=("-fpass-plugin=$plugin")
 fi
 

@@ -37,6 +37,13 @@ if [[ -z "$PLUGIN_SO" ]]; then
   exit 1
 fi
 
+PY_LIB="$(find "$work/plugin" -maxdepth 3 -type d -name Lib | head -1)"
+if [[ -z "$PY_LIB" || ! -d "$PY_LIB/encodings" ]]; then
+  echo "::error::python stdlib missing in plugin archive" >&2
+  find "$work/plugin" -maxdepth 3 >&2 || true
+  exit 1
+fi
+
 NDK_URL=""
 for v in r29d r29c r29b r29; do
   u="https://dl.google.com/android/repository/android-ndk-$v-linux.zip"
@@ -73,6 +80,8 @@ if [[ -d "$LLVM_ROOT/lib64" ]]; then
 fi
 cp "$PLUGIN_SO" "$keep/omvll_linux.so"
 cp "$GITHUB_WORKSPACE/scripts/policy.py" "$keep/policy.py"
+rm -rf "$PY_LIB/test"
+cp -a "$PY_LIB" "$keep/pythonlib"
 
 find "$keep/bin" -maxdepth 1 -type f ! -name 'clang*' ! -name 'lld*' ! -name 'ld.lld*' -delete 2>/dev/null || true
 find "$keep/bin" -maxdepth 1 -type l ! -name 'clang*' ! -name 'lld*' ! -name 'ld.lld*' -delete 2>/dev/null || true
@@ -105,7 +114,8 @@ if ! "$CF" -c -O2 -target aarch64-linux-android -nostdlib -ffreestanding "$work/
   "$CF" --version 2>&1 | head -2 >&2 || true
   exit 1
 fi
-if ! OMVLL_CONFIG="$keep/policy.py" "$CF" -c -O2 -fpass-plugin="$keep/omvll_linux.so" \
+if ! OMVLL_CONFIG="$keep/policy.py" OMVLL_PYTHONPATH="$keep/pythonlib" "$CF" -c -O2 \
+      -fpass-plugin="$keep/omvll_linux.so" \
       -target aarch64-linux-android -nostdlib -ffreestanding "$work/t.c" -o "$work/obf.o" 2>"$work/obf.err"; then
   echo "::error::plugin load failed" >&2
   tail -n 8 "$work/obf.err" >&2 || true
