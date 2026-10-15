@@ -107,6 +107,11 @@ if [[ "$PLUGIN_MODE" == "patched" ]]; then
     exit 1
   fi
   cp "$pso" "$keep/omvll_linux.so"
+  if ! strings "$keep/omvll_linux.so" | grep -q 'OMVLL_LOCAL_PATCH_INDIRECT_OPAQUE'; then
+    echo "::error::patched plugin lacks the local patch tag" >&2
+    exit 1
+  fi
+  echo "plugin: patched (tag verified)"
 fi
 
 cp "$GITHUB_WORKSPACE/scripts/policy.py" "$keep/policy.py"
