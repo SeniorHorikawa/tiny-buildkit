@@ -18,7 +18,9 @@ shim="$root/scripts/shim.h"
 
 args=()
 if [[ "${OBFUSCATION:-on}" != "off" ]]; then
-  export OMVLL_CONFIG="$OLLVM_DIR/policy.py"
+  policy="$root/scripts/policy.py"
+  [[ -f "$policy" ]] || policy="$OLLVM_DIR/policy.py"
+  export OMVLL_CONFIG="$policy"
   export OMVLL_PYTHONPATH="$OLLVM_DIR/pythonlib"
   args+=("-fpass-plugin=$plugin")
 fi

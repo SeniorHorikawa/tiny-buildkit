@@ -14,7 +14,9 @@ mkdir -p "$(dirname "$DEST")"
 if gh release download "$TAG" --repo "$CACHE_REPO" --pattern "$ASSET" --dir "$tmp" --clobber >/dev/null 2>&1; then
   mkdir -p "$DEST"
   tar -xzf "$tmp/$ASSET" -C "$DEST"
+  cp "$GITHUB_WORKSPACE/scripts/policy.py" "$DEST/policy.py"
   echo "toolchain: cache hit"
+  echo "policy: $(sha256sum "$DEST/policy.py" | cut -c1-12)"
   exit 0
 fi
 
@@ -141,3 +143,4 @@ gh release upload "$TAG" --repo "$CACHE_REPO" --clobber "$tmp/$ASSET" >/dev/null
 mkdir -p "$DEST"
 tar -xzf "$tmp/$ASSET" -C "$DEST"
 echo "toolchain ok"
+echo "policy: $(sha256sum "$DEST/policy.py" | cut -c1-12)"
