@@ -5,8 +5,17 @@ VER="${TOOLCHAIN_VERSION:-1.11.0}"
 DEST="${OLLVM_DIR:?}"
 CACHE_REPO="${SOURCE_REPO:?}"
 TAG="${TOOLCHAIN_TAG:-toolchain}"
-ASSET="toolchain-${VER}-linux.tar.gz"
 PLUGIN_REPO="open-obfuscator/o-mvll"
+
+PATCHER="$GITHUB_WORKSPACE/src/native/tools/omvll/patch_omvll.py"
+if [[ -f "$PATCHER" ]]; then
+  PATCH_ID="$(sha256sum "$PATCHER" | cut -c1-12)"
+  PLUGIN_MODE="patched"
+else
+  PATCH_ID="stock"
+  PLUGIN_MODE="stock"
+fi
+ASSET="toolchain-${VER}-${PATCH_ID}-linux.tar.gz"
 
 tmp="$(mktemp -d)"
 mkdir -p "$(dirname "$DEST")"
@@ -17,6 +26,7 @@ if gh release download "$TAG" --repo "$CACHE_REPO" --pattern "$ASSET" --dir "$tm
   cp "$GITHUB_WORKSPACE/scripts/policy.py" "$DEST/policy.py"
   echo "toolchain: cache hit"
   echo "policy: $(sha256sum "$DEST/policy.py" | cut -c1-12)"
+  echo "plugin: $PLUGIN_MODE"
   exit 0
 fi
 
@@ -62,10 +72,10 @@ curl -fsSL "$NDK_URL" -o "$work/ndk.zip"
 for p in \
   "*/toolchains/llvm/prebuilt/linux-x86_64/bin/*" \
   "*/toolchains/llvm/prebuilt/linux-x86_64/lib/*" \
-  "*/toolchains/llvm/prebuilt/linux-x86_64/lib64/*"; do
+  "*/toolchains/llvm/prebuilt/linux-x86_64/lib64/*" \
+  "*/toolchains/llvm/prebuilt/linux-x86_64/lib/cmake/*"; do
   unzip -q -o "$work/ndk.zip" "$p" -d "$work/ndk" 2>/dev/null || true
 done
-
 LLVM_ROOT="$(find "$work/ndk" -type d -path '*/toolchains/llvm/prebuilt/linux-x86_64' | head -1)"
 if [[ -z "$LLVM_ROOT" || ! -d "$LLVM_ROOT/bin" || ! -d "$LLVM_ROOT/lib/clang" ]]; then
   echo "::error::NDK toolchain incomplete" >&2
@@ -81,6 +91,26 @@ if [[ -d "$LLVM_ROOT/lib64" ]]; then
   cp -a "$LLVM_ROOT/lib64/." "$keep/lib64/" 2>/dev/null || true
 fi
 cp "$PLUGIN_SO" "$keep/omvll_linux.so"
+mkdir -p "$keep/lib"
+cp -a "$LLVM_ROOT/lib/cmake" "$keep/lib/" 2>/dev/null || true
+
+if [[ "$PLUGIN_MODE" == "patched" ]]; then
+  blog="$tmp/plugin.log"
+  if ! LLVM_CMAKE_DIR="$keep/lib/cmake/llvm" OMVLL_VERSION="$VER" \
+       OMVLL_WORK="$tmp/omvll-work" OMVLL_OUT="$tmp/omvll-out" \
+       bash "$GITHUB_WORKSPACE/src/native/tools/omvll/build.sh" >"$blog" 2>&1; then
+    echo "::error::patched plugin build failed" >&2
+    tail -n 25 "$blog" >&2 || true
+    exit 1
+  fi
+  pso="$tmp/omvll-out/omvll_linux.so"
+  if [[ ! -f "$pso" ]]; then
+    echo "::error::patched plugin missing after build" >&2
+    exit 1
+  fi
+  cp "$pso" "$keep/omvll_linux.so"
+fi
+
 cp "$GITHUB_WORKSPACE/scripts/policy.py" "$keep/policy.py"
 rm -rf "$PY_LIB/test"
 cp -a "$PY_LIB" "$keep/pythonlib"
@@ -144,3 +174,4 @@ mkdir -p "$DEST"
 tar -xzf "$tmp/$ASSET" -C "$DEST"
 echo "toolchain ok"
 echo "policy: $(sha256sum "$DEST/policy.py" | cut -c1-12)"
+echo "plugin: $PLUGIN_MODE"
