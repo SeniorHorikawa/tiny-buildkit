@@ -3,10 +3,17 @@ import omvll
 from functools import lru_cache
 
 LEVEL = int(os.environ.get("OBF_LEVEL", "3") or "3")
-SEED = os.environ.get("OBF_SEED", "")
+_raw_seed = os.environ.get("OBF_SEED", "")
 EXCLUDE_MODULES = []
 EXCLUDE_FUNCS = []
 INCLUDE_FUNCS = []
+
+if _raw_seed.lower() == "random":
+    SEED = int.from_bytes(os.urandom(4), "little")
+elif _raw_seed:
+    SEED = int(_raw_seed)
+else:
+    SEED = None
 
 
 class Policy(omvll.ObfuscationConfig):
@@ -70,6 +77,20 @@ class Policy(omvll.ObfuscationConfig):
 @lru_cache(maxsize=1)
 def omvll_get_config() -> omvll.ObfuscationConfig:
     omvll.config.shuffle_functions = True
-    if SEED:
-        omvll.config.probability_seed = int(SEED)
+    if SEED is not None:
+        omvll.config.probability_seed = SEED
+    if LEVEL >= 3:
+        omvll.config.pass_phases = {
+            omvll.Pass.AntiHook: {omvll.Phase.Last},
+            omvll.Pass.FunctionOutline: {omvll.Phase.Last},
+            omvll.Pass.StringEncoding: {omvll.Phase.Early, omvll.Phase.Last},
+            omvll.Pass.OpaqueFieldAccess: {omvll.Phase.Last},
+            omvll.Pass.BasicBlockDuplicate: {omvll.Phase.Last},
+            omvll.Pass.ControlFlowFlattening: {omvll.Phase.Last},
+            omvll.Pass.BreakControlFlow: {omvll.Phase.Last},
+            omvll.Pass.OpaqueConstants: {omvll.Phase.Last},
+            omvll.Pass.Arithmetic: {omvll.Phase.Last},
+            omvll.Pass.IndirectCall: {omvll.Phase.Last},
+            omvll.Pass.IndirectBranch: {omvll.Phase.Last},
+        }
     return Policy()
