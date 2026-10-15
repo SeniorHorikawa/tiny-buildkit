@@ -15,26 +15,35 @@ fi
 cd "$out"
 sha256sum ./*.apk > SHA256SUMS.txt
 
+extra=()
+if [[ -f "$out/omvll-logs.tar.gz" ]]; then
+  cp "$out/omvll-logs.tar.gz" "$out/obfuscator-logs-${ver}.tar.gz"
+  extra=("obfuscator-logs-${ver}.tar.gz")
+fi
+
 {
   echo "- artifacts: ${#apks[@]}"
   echo "- total size: $(du -ch ./*.apk | tail -1 | cut -f1)"
 } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 if gh release view "$tag" --repo "$SOURCE_REPO" >/dev/null 2>&1; then
-  if gh release upload "$tag" --repo "$SOURCE_REPO" --clobber ./*.apk SHA256SUMS.txt >/dev/null 2>&1; then
+  if gh release upload "$tag" --repo "$SOURCE_REPO" --clobber ./*.apk SHA256SUMS.txt ${extra[@]+"${extra[@]}"} >/dev/null 2>&1; then
     echo "uploaded: $tag"
+    [[ ${#extra[@]} -gt 0 ]] && echo "logs: ${extra[0]}"
     exit 0
   fi
 else
   if gh release create "$tag" --repo "$SOURCE_REPO" --title "$tag" --notes "automated build" \
-       ./*.apk SHA256SUMS.txt >/dev/null 2>&1; then
+       ./*.apk SHA256SUMS.txt ${extra[@]+"${extra[@]}"} >/dev/null 2>&1; then
     echo "uploaded: $tag"
+    [[ ${#extra[@]} -gt 0 ]] && echo "logs: ${extra[0]}"
     exit 0
   fi
 fi
 
-if gh release upload "$tag" --repo "$SOURCE_REPO" --clobber ./*.apk SHA256SUMS.txt >/dev/null 2>&1; then
+if gh release upload "$tag" --repo "$SOURCE_REPO" --clobber ./*.apk SHA256SUMS.txt ${extra[@]+"${extra[@]}"} >/dev/null 2>&1; then
   echo "uploaded: $tag"
+  [[ ${#extra[@]} -gt 0 ]] && echo "logs: ${extra[0]}"
   exit 0
 fi
 

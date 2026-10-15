@@ -165,6 +165,18 @@ if [[ -n "$mod_dir" ]]; then
   fi
 fi
 
+# Obligatory obfuscator logs.
+# o-mvll 只有在**作为编译器 pass 真正跑过**之后才会写 omvll-logs/ —— 也就是这里
+# （编译 App 的 native 源码时），而不是编译插件的时候。所以捕获点必须在 4-build.sh。
+# 公开日志只回显一行中性状态：日志里含函数名与源文件名，细节只进私库归档（见 5-upload.sh）。
+logdir="$(find "$src" -maxdepth 5 -type d -name 'omvll-logs' 2>/dev/null | head -1)"
+if [[ -n "$logdir" ]] && [[ -n "$(ls -A "$logdir" 2>/dev/null)" ]]; then
+  tar -czf "$out/omvll-logs.tar.gz" -C "$(dirname "$logdir")" "$(basename "$logdir")"
+  echo "obfuscator logs: captured ($(wc -c <"$out/omvll-logs.tar.gz") bytes)"
+else
+  echo "obfuscator logs: none"
+fi
+
 rm -rf "$nat_off" "$nat_on"
 ls -l "$out"
 echo "build ok"
