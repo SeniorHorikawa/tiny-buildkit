@@ -8,9 +8,13 @@ if [[ -z "$clang_bin" ]]; then
   exit 1
 fi
 
-chmod +x "$GITHUB_WORKSPACE/scripts/bin/cc"
-export PATH="$GITHUB_WORKSPACE/scripts/bin:$OLLVM_DIR/bin:$PATH"
-export ZIG="$GITHUB_WORKSPACE/scripts/bin/cc"
+chmod +x "$GITHUB_WORKSPACE/scripts/bin/cc" 2>/dev/null || true
+wbin="${RUNNER_TEMP:-/tmp}/wbin"
+mkdir -p "$wbin"
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$GITHUB_WORKSPACE/scripts/bin/cc" > "$wbin/cc"
+chmod 755 "$wbin/cc"
+export PATH="$wbin:$OLLVM_DIR/bin:$PATH"
+export ZIG="$wbin/cc"
 
 host_cc="$(command -v gcc || command -v cc || true)"
 if [[ -n "$host_cc" ]]; then
@@ -21,7 +25,8 @@ log="${RUNNER_TEMP:-/tmp}/build.log"
 set +e
 (
   cd "$src"
-  ./gradlew nativeBuild :app:assembleRelease -x nativeVerify -Pbash=/bin/bash --console=plain
+  chmod +x ./gradlew 2>/dev/null || true
+  bash ./gradlew nativeBuild :app:assembleRelease -x nativeVerify -Pbash=/bin/bash --console=plain
 ) >"$log" 2>&1
 rc=$?
 set -e
