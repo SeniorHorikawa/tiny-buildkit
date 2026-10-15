@@ -112,6 +112,10 @@ if [[ "$PLUGIN_MODE" == "patched" ]]; then
     exit 1
   fi
   echo "plugin: patched (tag verified)"
+  if [[ -f "$tmp/omvll-out/pass-summary.txt" ]]; then
+    echo "----- obfuscator pass log (counts only) -----"
+    sed 's/^/  /' "$tmp/omvll-out/pass-summary.txt"
+  fi
 fi
 
 cp "$GITHUB_WORKSPACE/scripts/policy.py" "$keep/policy.py"
