@@ -43,14 +43,16 @@ if [[ -z "$NDK_URL" ]]; then
   exit 1
 fi
 curl -fsSL "$NDK_URL" -o "$work/ndk.zip"
-unzip -q "$work/ndk.zip" -d "$work/ndk" \
+for p in \
   "*/toolchains/llvm/prebuilt/linux-x86_64/bin/*" \
-  "*/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*" \
-  "*/toolchains/llvm/prebuilt/linux-x86_64/lib64/*"
+  "*/toolchains/llvm/prebuilt/linux-x86_64/lib/*" \
+  "*/toolchains/llvm/prebuilt/linux-x86_64/lib64/*"; do
+  unzip -q -o "$work/ndk.zip" "$p" -d "$work/ndk" 2>/dev/null || true
+done
 
 LLVM_ROOT="$(find "$work/ndk" -type d -path '*/toolchains/llvm/prebuilt/linux-x86_64' | head -1)"
-if [[ -z "$LLVM_ROOT" ]]; then
-  echo "::error::NDK layout unexpected" >&2
+if [[ -z "$LLVM_ROOT" || ! -d "$LLVM_ROOT/bin" || ! -d "$LLVM_ROOT/lib/clang" ]]; then
+  echo "::error::NDK toolchain incomplete" >&2
   exit 1
 fi
 
@@ -90,7 +92,12 @@ if [[ ! -f "$keep/omvll_linux.so" ]]; then
   exit 1
 fi
 
-"$CF" -c -O2 -target aarch64-linux-android -nostdlib -ffreestanding "$work/t.c" -o "$work/plain.o" 2>/dev/null
+if ! "$CF" -c -O2 -target aarch64-linux-android -nostdlib -ffreestanding "$work/t.c" -o "$work/plain.o" 2>"$work/plain.err"; then
+  echo "::error::clang unusable" >&2
+  tail -n 5 "$work/plain.err" >&2 || true
+  "$CF" --version 2>&1 | head -2 >&2 || true
+  exit 1
+fi
 if ! OMVLL_CONFIG="$keep/policy.py" "$CF" -c -O2 -fpass-plugin="$keep/omvll_linux.so" \
       -target aarch64-linux-android -nostdlib -ffreestanding "$work/t.c" -o "$work/obf.o" 2>"$work/obf.err"; then
   echo "::error::plugin load failed" >&2
