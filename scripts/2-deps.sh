@@ -7,7 +7,10 @@ mkdir -p "$cache"
 
 for f in "$src"/tools/*/fetch-lib.sh; do
   if [[ -f "$f" ]]; then
-    bash "$f" >/dev/null 2>&1 || true
+    # 别静默吞掉失败：这一步失败 ⇒ 后面的构建必然缺依赖。历史上这里把下载失败吃掉了，
+    # 结果错误拖到很靠后的步骤才炸（看起来像那一层自己坏了），定位成本很高。
+    # 这里只报脚本自身的名字（不回显任何路径/模块名），真正的兜底在源仓库那侧。
+    bash "$f" >/dev/null 2>&1 || echo "::warning::$(basename "$f") returned non-zero (network?)" >&2
   fi
 done
 
