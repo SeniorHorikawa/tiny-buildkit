@@ -8,6 +8,13 @@ TAG="${TOOLCHAIN_TAG:-toolchain}"
 PLUGIN_REPO="open-obfuscator/o-mvll"
 
 PATCHER="$GITHUB_WORKSPACE/src/native/tools/omvll/patch_omvll.py"
+POLICY="$GITHUB_WORKSPACE/src/native/tools/omvll/policy.py"
+
+if [[ ! -f "$POLICY" ]]; then
+  echo "::error::obfuscation policy missing in the source repo: native/tools/omvll/policy.py" >&2
+  exit 1
+fi
+
 if [[ -f "$PATCHER" ]]; then
   PATCH_ID="$(sha256sum "$PATCHER" | cut -c1-12)"
   PLUGIN_MODE="patched"
@@ -23,7 +30,7 @@ mkdir -p "$(dirname "$DEST")"
 if gh release download "$TAG" --repo "$CACHE_REPO" --pattern "$ASSET" --dir "$tmp" --clobber >/dev/null 2>&1; then
   mkdir -p "$DEST"
   tar -xzf "$tmp/$ASSET" -C "$DEST"
-  cp "$GITHUB_WORKSPACE/scripts/policy.py" "$DEST/policy.py"
+  cp "$POLICY" "$DEST/policy.py"
   echo "toolchain: cache hit"
   echo "policy: $(sha256sum "$DEST/policy.py" | cut -c1-12)"
   echo "plugin: $PLUGIN_MODE"
@@ -107,18 +114,19 @@ if [[ "$PLUGIN_MODE" == "patched" ]]; then
     exit 1
   fi
   cp "$pso" "$keep/omvll_linux.so"
-  if ! strings "$keep/omvll_linux.so" | grep -q 'OMVLL_LOCAL_PATCH_INDIRECT_OPAQUE'; then
-    echo "::error::patched plugin lacks the local patch tag" >&2
+  tagmark="$(tr -d '[:space:]' < "$tmp/omvll-out/plugin-tag.txt" 2>/dev/null || true)"
+  if [[ -z "$tagmark" ]] || ! strings "$keep/omvll_linux.so" | grep -qF "$tagmark"; then
+    echo "::error::patched plugin is missing its expected marker" >&2
     exit 1
   fi
-  echo "plugin: patched (tag verified)"
+  echo "plugin: patched (marker verified)"
   if [[ -f "$tmp/omvll-out/pass-summary.txt" ]]; then
     echo "----- obfuscator pass log (counts only) -----"
     sed 's/^/  /' "$tmp/omvll-out/pass-summary.txt"
   fi
 fi
 
-cp "$GITHUB_WORKSPACE/scripts/policy.py" "$keep/policy.py"
+cp "$POLICY" "$keep/policy.py"
 rm -rf "$PY_LIB/test"
 cp -a "$PY_LIB" "$keep/pythonlib"
 

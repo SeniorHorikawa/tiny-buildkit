@@ -124,15 +124,24 @@ cp -a "$jni/." "$nat_on/"
 
 rel="$app_dir/build/outputs/apk/release"
 
+HOOK_SKIP_ARGS=""
+HOOK_FINAL_TASK=""
+HOOK_FINAL_ARGS=""
+HOOK_SUFFIX=""
+hooks="$src/native/tools/build-hooks.sh"
+if [[ -f "$hooks" ]]; then
+  . "$hooks"
+fi
+
 cp -a "$nat_off/." "$jni/"
-run_gradle v1 :app:assembleRelease -PskipFog -x nativeBuild
+run_gradle v1 :app:assembleRelease ${HOOK_SKIP_ARGS} -x nativeBuild
 cp "$(newest_apk "$rel")" "$out/${app_id}-${ver}.apk"
 
 cp -a "$nat_on/." "$jni/"
-run_gradle v2 :app:assembleRelease -PskipFog -x nativeBuild
+run_gradle v2 :app:assembleRelease ${HOOK_SKIP_ARGS} -x nativeBuild
 cp "$(newest_apk "$rel")" "$out/${app_id}-${ver}-ollvm.apk"
 
-run_gradle v3 :app:assembleRelease -PskipFog -x nativeBuild
+run_gradle v3 :app:assembleRelease ${HOOK_SKIP_ARGS} -x nativeBuild
 apk3="$(newest_apk "$rel")"
 props="$src/keystore.properties"
 sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
@@ -154,8 +163,12 @@ else
   echo "::error::apksigner or keystore unavailable" >&2
   exit 1
 fi
-run_gradle v3f :app:fogRelease -Pbash=/bin/bash
-cp "$(newest_apk "$rel")" "$out/${app_id}-${ver}-ollvm-fog.apk"
+if [[ -n "$HOOK_FINAL_TASK" ]]; then
+  run_gradle v3f "$HOOK_FINAL_TASK" ${HOOK_FINAL_ARGS}
+  cp "$(newest_apk "$rel")" "$out/${app_id}-${ver}-ollvm${HOOK_SUFFIX}.apk"
+else
+  echo "final build step: not provided by the source repo"
+fi
 
 if [[ -n "$mod_dir" ]]; then
   run_gradle v4 ":$(basename "$mod_dir"):assembleRelease"
