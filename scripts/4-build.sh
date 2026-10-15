@@ -82,7 +82,7 @@ fog_log="${RUNNER_TEMP:-/tmp}/fog.log"
 set +e
 (
   cd "$src"
-  bash ./gradlew :app:fogRelease --console=plain
+  bash ./gradlew :app:fogRelease -Pbash=/bin/bash --console=plain
 ) >"$fog_log" 2>&1
 rc=$?
 set -e
