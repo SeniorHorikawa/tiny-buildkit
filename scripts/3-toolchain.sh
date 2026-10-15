@@ -91,12 +91,10 @@ if [[ -d "$LLVM_ROOT/lib64" ]]; then
   cp -a "$LLVM_ROOT/lib64/." "$keep/lib64/" 2>/dev/null || true
 fi
 cp "$PLUGIN_SO" "$keep/omvll_linux.so"
-mkdir -p "$keep/lib"
-cp -a "$LLVM_ROOT/lib/cmake" "$keep/lib/" 2>/dev/null || true
 
 if [[ "$PLUGIN_MODE" == "patched" ]]; then
   blog="$tmp/plugin.log"
-  if ! LLVM_CMAKE_DIR="$keep/lib/cmake/llvm" OMVLL_VERSION="$VER" \
+  if ! OMVLL_VERSION="$VER" \
        OMVLL_WORK="$tmp/omvll-work" OMVLL_OUT="$tmp/omvll-out" \
        bash "$GITHUB_WORKSPACE/src/native/tools/omvll/build.sh" >"$blog" 2>&1; then
     echo "::error::patched plugin build failed" >&2
