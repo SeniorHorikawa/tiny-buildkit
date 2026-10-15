@@ -1,0 +1,86 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: "owner/repo"
+        required: false
+        default: ""
+      source_ref:
+        description: "ref"
+        required: false
+        default: ""
+      ollvm_branch:
+        description: "llvm-12.x"
+        required: false
+        default: "llvm-12.x"
+      obfuscation:
+        description: "max / balanced / off"
+        required: false
+        default: "max"
+      release_tag:
+        description: "tag"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build
+  cancel-in-progress: false
+
+env:
+  GRADLE_USER_HOME: ${{ github.workspace }}/.gradle
+  OLLVM_DIR: ${{ github.workspace }}/.toolchain
+  TOOLCHAIN_TAG: ollvm-toolchain
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    env:
+      INPUT_SOURCE_REPO: ${{ inputs.source_repo }}
+      INPUT_SOURCE_REF: ${{ inputs.source_ref }}
+      INPUT_OLLVM_BRANCH: ${{ inputs.ollvm_branch }}
+      INPUT_OBFUSCATION: ${{ inputs.obfuscation }}
+      INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup
+        env:
+          SECRET_PAT: ${{ secrets.SRC_TOKEN || secrets.Actions }}
+          VARS_REPO: ${{ vars.SRC_REPO }}
+        run: bash scripts/1-setup.sh
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SRC_REPO || inputs.source_repo }}
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.SRC_TOKEN || secrets.Actions }}
+          path: src
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Dependencies
+        run: bash scripts/2-deps.sh src
+
+      - name: Toolchain
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/3-toolchain.sh
+
+      - name: Build
+        run: bash scripts/4-build.sh src
+
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ secrets.SRC_TOKEN || secrets.Actions }}
+        run: bash scripts/5-upload.sh src
