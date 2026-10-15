@@ -100,18 +100,26 @@ nat_off="$out/.native-off"
 nat_on="$out/.native-on"
 mkdir -p "$nat_off" "$nat_on"
 
-nat_log="${RUNNER_TEMP:-/tmp}/native.log"
-if ! OBFUSCATION=off bash "$GITHUB_WORKSPACE/scripts/build-native.sh" "$src" >"$nat_log" 2>&1; then
-  echo "----- native (plain) failed -----" >&2
-  filter_log "$nat_log" >&2 || true
-  exit 1
-fi
+native_build() {
+  local lvl="$1"
+  local log="${RUNNER_TEMP:-/tmp}/native-$lvl.log"
+  set +e
+  (
+    cd "$src"
+    OBFUSCATION="$lvl" ZIG="$wbin/cc" bash native/build.sh
+  ) >"$log" 2>&1
+  local rc=$?
+  set -e
+  if [[ "$rc" -ne 0 ]]; then
+    echo "----- native ($lvl) failed -----" >&2
+    filter_log "$log" >&2 || true
+    exit "$rc"
+  fi
+}
+
+native_build off
 cp -a "$jni/." "$nat_off/"
-if ! OBFUSCATION=on bash "$GITHUB_WORKSPACE/scripts/build-native.sh" "$src" >"$nat_log" 2>&1; then
-  echo "----- native (obfuscated) failed -----" >&2
-  filter_log "$nat_log" >&2 || true
-  exit 1
-fi
+native_build on
 cp -a "$jni/." "$nat_on/"
 
 rel="$app_dir/build/outputs/apk/release"
