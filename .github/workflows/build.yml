@@ -38,7 +38,6 @@ env:
 
 jobs:
   build:
-    if: github.actor == github.repository_owner
     runs-on: ubuntu-22.04
     timeout-minutes: 240
     env:
