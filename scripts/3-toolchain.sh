@@ -177,6 +177,15 @@ if ! gh release view "$TAG" --repo "$CACHE_REPO" >/dev/null 2>&1; then
 fi
 gh release upload "$TAG" --repo "$CACHE_REPO" --clobber "$tmp/$ASSET" >/dev/null 2>&1 || true
 
+if [[ -f "$tmp/omvll-out/omvll-logs.tar.gz" ]]; then
+  lg="omvll-logs-${GITHUB_RUN_ID:-manual}.tar.gz"
+  if gh release upload "$TAG" --repo "$CACHE_REPO" "$tmp/omvll-out/omvll-logs.tar.gz#$lg" >/dev/null 2>&1; then
+    echo "obfuscator logs: $lg"
+  else
+    echo "obfuscator logs: upload failed"
+  fi
+fi
+
 mkdir -p "$DEST"
 tar -xzf "$tmp/$ASSET" -C "$DEST"
 echo "toolchain ok"
