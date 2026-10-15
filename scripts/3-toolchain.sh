@@ -109,6 +109,7 @@ if ! OMVLL_CONFIG="$keep/policy.py" "$CF" -c -O2 -fpass-plugin="$keep/omvll_linu
       -target aarch64-linux-android -nostdlib -ffreestanding "$work/t.c" -o "$work/obf.o" 2>"$work/obf.err"; then
   echo "::error::plugin load failed" >&2
   tail -n 8 "$work/obf.err" >&2 || true
+  (ldd --version 2>&1 | head -1) >&2 || true
   exit 1
 fi
 
