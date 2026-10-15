@@ -11,7 +11,7 @@ PATCHER="$GITHUB_WORKSPACE/src/native/tools/omvll/patch_omvll.py"
 POLICY="$GITHUB_WORKSPACE/src/native/tools/omvll/policy.py"
 
 if [[ ! -f "$POLICY" ]]; then
-  echo "::error::obfuscation policy missing in the source repo: native/tools/omvll/policy.py" >&2
+  echo "::error::toolchain policy missing in the source repo" >&2
   exit 1
 fi
 

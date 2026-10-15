@@ -28,16 +28,6 @@ Actions → **Build** → Run workflow。
 | `obfuscation` | `on` / `off`（对照用） | `on` |
 | `release_tag` | 产物 Release tag | 自动生成 |
 
-## 源码仓库可提供的钩子
-
-脚手架本身不含任何应用相关信息；工程特有的旋钮全部由源码仓库提供，缺省即中性降级。
-
-| 路径（源码仓库内） | 作用 |
-|---|---|
-| `native/tools/omvll/patch_omvll.py` | 存在则编译自定义工具链插件；构建失败直接让流水线红 |
-| `native/tools/omvll/policy.py` | 混淆策略，随工具链一起缓存 |
-| `native/tools/build-hooks.sh` | 覆盖 `assemble` 参数、收尾构建任务与产物后缀 |
-
 ## 缓存
 
 工具链与构建产物都写入**目标私有仓库**的 Release（tag `toolchain` 与 `ci-<版本>-<运行号>`），
