@@ -28,7 +28,14 @@ if [[ -z "$PLUGIN_URL" ]]; then
   exit 1
 fi
 curl -fsSL "$PLUGIN_URL" -o "$work/plugin.tar.gz"
-tar -xzf "$work/plugin.tar.gz" -C "$work"
+mkdir -p "$work/plugin"
+tar -xzf "$work/plugin.tar.gz" -C "$work/plugin"
+PLUGIN_SO="$(find "$work/plugin" -type f -name '*.so' | head -1)"
+if [[ -z "$PLUGIN_SO" ]]; then
+  echo "::error::plugin archive unexpected" >&2
+  find "$work/plugin" >&2 || true
+  exit 1
+fi
 
 NDK_URL=""
 for v in r29d r29c r29b r29; do
@@ -64,7 +71,7 @@ if [[ -d "$LLVM_ROOT/lib64" ]]; then
   mkdir -p "$keep/lib64"
   cp -a "$LLVM_ROOT/lib64/." "$keep/lib64/" 2>/dev/null || true
 fi
-mv "$work"/omvll_linux.so "$keep/" 2>/dev/null || true
+cp "$PLUGIN_SO" "$keep/omvll_linux.so"
 cp "$GITHUB_WORKSPACE/scripts/policy.py" "$keep/policy.py"
 
 find "$keep/bin" -maxdepth 1 -type f ! -name 'clang*' ! -name 'lld*' ! -name 'ld.lld*' -delete 2>/dev/null || true
