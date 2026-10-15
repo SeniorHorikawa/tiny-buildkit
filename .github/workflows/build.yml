@@ -86,4 +86,4 @@ jobs:
       - name: Upload
         env:
           GH_TOKEN: ${{ secrets.SRC_TOKEN || secrets.Actions }}
-        run: bash scripts/5-upload.sh src
+        run: bash scripts/5-upload.sh

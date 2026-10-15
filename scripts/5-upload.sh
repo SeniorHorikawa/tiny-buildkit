@@ -1,45 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-src="${1:?usage: 5-upload.sh <dir>}"
-outdir="$src/app/build/outputs/apk/release"
-apk="$(ls -t "$outdir"/*.apk 2>/dev/null | head -1 || true)"
+out="${RUNNER_TEMP:-/tmp}/artifacts"
+ver="${VERSION:?}"
+tag="${INPUT_RELEASE_TAG:-v${ver}}"
 
-if [[ -z "$apk" || ! -f "$apk" ]]; then
-  echo "::error::apk not found" >&2
+shopt -s nullglob
+apks=("$out"/*.apk)
+if (( ${#apks[@]} == 0 )); then
+  echo "::error::no apk produced" >&2
   exit 1
 fi
 
-version="$(sed -n 's/.*versionName *= *"\([^"]*\)".*/\1/p' "$src/app/build.gradle.kts" | head -1)"
-version="${version:-0.0.0}"
-run="${GITHUB_RUN_NUMBER:-0}"
-tag="${INPUT_RELEASE_TAG:-ci-${version}-${run}}"
-
-work="$(mktemp -d)"
-asset="$work/app-${version}-${run}.apk"
-cp "$apk" "$asset"
-sha="$(sha256sum "$asset" | cut -d' ' -f1)"
-printf '%s  %s\n' "$sha" "$(basename "$asset")" > "$asset.sha256"
+cd "$out"
+sha256sum ./*.apk > SHA256SUMS.txt
 
 {
-  echo "version: $version"
-  echo "size: $(stat -c%s "$asset")"
-  echo "sha256: $sha"
+  echo "- artifacts: ${#apks[@]}"
+  echo "- total size: $(du -ch ./*.apk | tail -1 | cut -f1)"
 } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
-target=()
-if [[ -n "${SOURCE_REF:-}" ]]; then
-  target=(--target "$SOURCE_REF")
+if gh release view "$tag" --repo "$SOURCE_REPO" >/dev/null 2>&1; then
+  if gh release upload "$tag" --repo "$SOURCE_REPO" --clobber ./*.apk SHA256SUMS.txt >/dev/null 2>&1; then
+    echo "uploaded: $tag"
+    exit 0
+  fi
+else
+  if gh release create "$tag" --repo "$SOURCE_REPO" --title "$tag" --notes "automated build" \
+       ./*.apk SHA256SUMS.txt >/dev/null 2>&1; then
+    echo "uploaded: $tag"
+    exit 0
+  fi
 fi
 
-if gh release create "$tag" --repo "$SOURCE_REPO" \
-     --title "$version" --notes "automated build" \
-     "${target[@]}" "$asset" "$asset.sha256" >/dev/null 2>&1; then
-  echo "uploaded: $tag"
-  exit 0
-fi
-
-if gh release upload "$tag" --repo "$SOURCE_REPO" --clobber "$asset" "$asset.sha256" >/dev/null 2>&1; then
+if gh release upload "$tag" --repo "$SOURCE_REPO" --clobber ./*.apk SHA256SUMS.txt >/dev/null 2>&1; then
   echo "uploaded: $tag"
   exit 0
 fi

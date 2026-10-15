@@ -2,6 +2,10 @@
 set -euo pipefail
 
 src="${1:?usage: 4-build.sh <dir>}"
+ver="${VERSION:?}"
+IFS=. read -r v_ma v_mi v_pa <<< "$ver"
+vcode=$(( v_ma * 10000 + v_mi * 100 + v_pa ))
+
 clang_bin="$(find "$OLLVM_DIR/bin" -maxdepth 1 \( -name clang -o -name 'clang-[0-9]*' \) | head -1)"
 if [[ -z "$clang_bin" ]]; then
   echo "::error::toolchain not ready" >&2
@@ -36,58 +40,123 @@ report_fail() {
   exit "$rc"
 }
 
-build_log="${RUNNER_TEMP:-/tmp}/build.log"
-set +e
-(
-  cd "$src"
-  chmod +x ./gradlew 2>/dev/null || true
-  bash ./gradlew nativeBuild :app:assembleRelease -PskipFog --console=plain
-) >"$build_log" 2>&1
-rc=$?
-set -e
-if [[ "$rc" -ne 0 ]]; then
-  report_fail "$rc" "$build_log"
+app_dir="$src/app"
+app_id="$(sed -n 's/^ *applicationId *= *"\([^"]*\)".*/\1/p' "$app_dir/build.gradle.kts" 2>/dev/null | head -1)"
+app_id="${app_id:-app}"
+echo "::add-mask::$app_id"
+
+mod_dir=""
+mod_id=""
+for d in "$src"/*/; do
+  d="${d%/}"
+  n="$(basename "$d")"
+  [[ "$n" == "app" ]] && continue
+  [[ -f "$d/build.gradle.kts" ]] || continue
+  m="$(sed -n 's/^ *applicationId *= *"\([^"]*\)".*/\1/p' "$d/build.gradle.kts" 2>/dev/null | head -1)"
+  if [[ -n "$m" ]]; then
+    mod_dir="$d"
+    mod_id="$m"
+    echo "::add-mask::$m"
+    break
+  fi
+done
+
+bump_version() {
+  local f="$1"
+  [[ -f "$f" ]] || return 0
+  sed -i "s/^\( *\)versionName *= *\"[^\"]*\"/\1versionName = \"$ver\"/" "$f" 2>/dev/null || true
+  sed -i "s/^\( *\)versionCode *= *[0-9]*/\1versionCode = $vcode/" "$f" 2>/dev/null || true
+}
+bump_version "$app_dir/build.gradle.kts"
+if [[ -n "$mod_dir" ]]; then
+  bump_version "$mod_dir/build.gradle.kts"
 fi
 
-apk="$src/app/build/outputs/apk/release/app-release.apk"
-props="$src/keystore.properties"
-if [[ ! -f "$apk" || ! -f "$props" ]]; then
-  echo "::error::apk or keystore properties missing" >&2
+out="${RUNNER_TEMP:-/tmp}/artifacts"
+rm -rf "$out"
+mkdir -p "$out"
+
+run_gradle() {
+  local tag="$1"
+  shift
+  local log="${RUNNER_TEMP:-/tmp}/$tag.log"
+  set +e
+  (
+    cd "$src"
+    chmod +x ./gradlew 2>/dev/null || true
+    bash ./gradlew "$@" --console=plain
+  ) >"$log" 2>&1
+  local rc=$?
+  set -e
+  if [[ "$rc" -ne 0 ]]; then
+    report_fail "$rc" "$log"
+  fi
+}
+
+newest_apk() { ls -t "$1"/*.apk 2>/dev/null | head -1; }
+
+jni="$app_dir/src/main/jniLibs/arm64-v8a"
+nat_off="$out/.native-off"
+nat_on="$out/.native-on"
+mkdir -p "$nat_off" "$nat_on"
+
+nat_log="${RUNNER_TEMP:-/tmp}/native.log"
+if ! OBFUSCATION=off bash "$GITHUB_WORKSPACE/scripts/build-native.sh" "$src" >"$nat_log" 2>&1; then
+  echo "----- native (plain) failed -----" >&2
+  filter_log "$nat_log" >&2 || true
   exit 1
 fi
+cp -a "$jni/." "$nat_off/"
+if ! OBFUSCATION=on bash "$GITHUB_WORKSPACE/scripts/build-native.sh" "$src" >"$nat_log" 2>&1; then
+  echo "----- native (obfuscated) failed -----" >&2
+  filter_log "$nat_log" >&2 || true
+  exit 1
+fi
+cp -a "$jni/." "$nat_on/"
 
+rel="$app_dir/build/outputs/apk/release"
+
+cp -a "$nat_off/." "$jni/"
+run_gradle v1 :app:assembleRelease -PskipFog -x nativeBuild
+cp "$(newest_apk "$rel")" "$out/${app_id}-${ver}.apk"
+
+cp -a "$nat_on/." "$jni/"
+run_gradle v2 :app:assembleRelease -PskipFog -x nativeBuild
+cp "$(newest_apk "$rel")" "$out/${app_id}-${ver}-ollvm.apk"
+
+run_gradle v3 :app:assembleRelease -PskipFog -x nativeBuild
+apk3="$(newest_apk "$rel")"
+props="$src/keystore.properties"
 sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-tools="$(ls -1d "$sdk"/build-tools/* 2>/dev/null | sort -V | tail -1)"
-signer="$tools/apksigner"
-store="$(sed -n 's/^storeFile=//p' "$props" | tr -d '\r')"
-spass="$(sed -n 's/^storePassword=//p' "$props" | tr -d '\r')"
-kalias="$(sed -n 's/^keyAlias=//p' "$props" | tr -d '\r')"
-kpass="$(sed -n 's/^keyPassword=//p' "$props" | tr -d '\r')"
-
+signer="$(ls -1d "$sdk"/build-tools/* 2>/dev/null | sort -V | tail -1)/apksigner"
+store="$(sed -n 's/^storeFile=//p' "$props" 2>/dev/null | tr -d '\r')"
+spass="$(sed -n 's/^storePassword=//p' "$props" 2>/dev/null | tr -d '\r')"
+kalias="$(sed -n 's/^keyAlias=//p' "$props" 2>/dev/null | tr -d '\r')"
+kpass="$(sed -n 's/^keyPassword=//p' "$props" 2>/dev/null | tr -d '\r')"
 if [[ -x "$signer" && -n "$store" && -n "$spass" ]]; then
   if ! "$signer" sign --ks "$src/$store" --ks-key-alias "$kalias" \
         --ks-pass "pass:$spass" --key-pass "pass:$kpass" \
         --v2-signing-enabled true --v3-signing-enabled true \
-        --out "$apk.resigned" "$apk" >/dev/null 2>&1; then
+        --out "$apk3.resigned" "$apk3" >/dev/null 2>&1; then
     echo "::error::resign failed" >&2
     exit 1
   fi
-  mv "$apk.resigned" "$apk"
+  mv "$apk3.resigned" "$apk3"
 else
   echo "::error::apksigner or keystore unavailable" >&2
   exit 1
 fi
+run_gradle v3f :app:fogRelease -Pbash=/bin/bash
+cp "$(newest_apk "$rel")" "$out/${app_id}-${ver}-ollvm-fog.apk"
 
-fog_log="${RUNNER_TEMP:-/tmp}/fog.log"
-set +e
-(
-  cd "$src"
-  bash ./gradlew :app:fogRelease -Pbash=/bin/bash --console=plain
-) >"$fog_log" 2>&1
-rc=$?
-set -e
-if [[ "$rc" -ne 0 ]]; then
-  report_fail "$rc" "$fog_log"
+if [[ -n "$mod_dir" ]]; then
+  run_gradle v4 ":$(basename "$mod_dir"):assembleRelease"
+  mapk="$(newest_apk "$mod_dir/build/outputs/apk/release")"
+  if [[ -n "$mapk" ]]; then
+    cp "$mapk" "$out/${mod_id}-${ver}.apk"
+  fi
 fi
 
+rm -rf "$nat_off" "$nat_on"
+ls -l "$out"
 echo "build ok"
