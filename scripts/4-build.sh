@@ -128,6 +128,9 @@ HOOK_SKIP_ARGS=""
 HOOK_FINAL_TASK=""
 HOOK_FINAL_ARGS=""
 HOOK_SUFFIX=""
+HOOK_FINAL2_TASK=""
+HOOK_FINAL2_ARGS=""
+HOOK_FINAL2_SUFFIX=""
 hooks="$src/native/tools/build-hooks.sh"
 if [[ -f "$hooks" ]]; then
   . "$hooks"
@@ -166,6 +169,12 @@ fi
 if [[ -n "$HOOK_FINAL_TASK" ]]; then
   run_gradle v3f "$HOOK_FINAL_TASK" ${HOOK_FINAL_ARGS}
   cp "$(newest_apk "$rel")" "$out/${app_id}-${ver}-ollvm${HOOK_SUFFIX}.apk"
+  # 可选的第二个收尾任务：对它前面的产物再加工一次，产出另一个变体
+  # （输入由源仓库自己的任务保证；这里只负责跑 + 复制）。
+  if [[ -n "$HOOK_FINAL2_TASK" ]]; then
+    run_gradle v3x "$HOOK_FINAL2_TASK" ${HOOK_FINAL2_ARGS}
+    cp "$(newest_apk "$rel")" "$out/${app_id}-${ver}-ollvm${HOOK_SUFFIX}${HOOK_FINAL2_SUFFIX}.apk"
+  fi
 else
   echo "final build step: not provided by the source repo"
 fi
