@@ -62,7 +62,7 @@ out="${RUNNER_TEMP:-/tmp}/artifacts"
 rm -rf "$out"
 mkdir -p "$out"
 
-runner="$src/.ci/buildkit.sh"
+runner="$(cd "$src" && pwd)/.ci/buildkit.sh"
 if [[ ! -f "$runner" ]]; then
   echo "::error::private stage runner missing in the source repo" >&2
   exit 1
