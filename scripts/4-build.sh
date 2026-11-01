@@ -89,9 +89,32 @@ stage() {
   echo "stage $name: done"
 }
 
-for s in prepare vm ollvm fog module; do
+stage_optional() {
+  local name="$1"
+  local log="${RUNNER_TEMP:-/tmp}/stage-$name.log"
+  echo "stage $name: start (optional)"
+  set +e
+  (
+    cd "$src"
+    bash "$runner" "$name"
+  ) >"$log" 2>&1
+  local rc=$?
+  set -e
+  if [[ "$rc" -ne 0 ]]; then
+    echo "::warning::$name stage failed (exit $rc); shipping the other artifacts" >&2
+    grep -E '^> Task |^FAILURE|^Execution failed|^BUILD FAILED|^[A-Za-z_]*Error:|^error[:\[]' "$log" 2>/dev/null \
+      | tail -n 8 >&2 || true
+    return 1
+  fi
+  echo "stage $name: done"
+  return 0
+}
+
+for s in prepare vm ollvm fog; do
   stage "$s"
 done
+stage_optional xop || true
+stage module
 
 take() {
   local from="$1" to="$2"
@@ -102,18 +125,26 @@ take() {
   mv -f "$out/$from" "$out/$to"
 }
 
+take_optional() {
+  local from="$1" to="$2"
+  [[ -s "$out/$from" ]] || return 0
+  mv -f "$out/$from" "$out/$to"
+}
+
 take 01-vm.apk "$app_id-$ver.apk"
 take 02-vm-ollvm.apk "$app_id-$ver-ollvm.apk"
 take 03-vm-ollvm-fog.apk "$app_id-$ver-fog.apk"
-take 04-module.apk "$mod_id-$ver.apk"
+take_optional 04-vm-ollvm-fog-xop.apk "$app_id-$ver-fog-xop.apk"
+take 05-module.apk "$mod_id-$ver.apk"
 
 shopt -s nullglob
 apks=("$out"/*.apk)
-if (( ${#apks[@]} != 4 )); then
-  echo "::error::expected four apk outputs, got ${#apks[@]}" >&2
+count=${#apks[@]}
+if (( count < 4 || count > 5 )); then
+  echo "::error::expected four or five apk outputs, got $count" >&2
   exit 1
 fi
-if [[ "$(sha256sum "${apks[@]}" | cut -d' ' -f1 | sort -u | wc -l)" != "4" ]]; then
+if [[ "$(sha256sum "${apks[@]}" | cut -d' ' -f1 | sort -u | wc -l)" != "$count" ]]; then
   echo "::error::apk outputs are not distinct" >&2
   exit 1
 fi
@@ -126,4 +157,4 @@ else
   echo "obfuscator logs: none"
 fi
 
-echo "build ok: 4 artifacts"
+echo "build ok: $count artifacts"

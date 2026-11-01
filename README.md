@@ -27,9 +27,9 @@ Actions → **Build** → Run workflow。
 | `toolchain_version` | 工具链版本 | `1.11.0` |
 | `release_tag` | 产物 Release tag | 自动生成（`v<版本>`） |
 
-## 四个产物
+## 产物
 
-`4-build.sh` 按顺序调用私有仓库的 `.ci/buildkit.sh <stage>`，五个阶段：
+`4-build.sh` 按顺序调用私有仓库的 `.ci/buildkit.sh <stage>`：
 
 | 阶段 | 作用 | 产出（`$ARTIFACTS_DIR`） |
 |---|---|---|
@@ -37,10 +37,13 @@ Actions → **Build** → Run workflow。
 | `vm` | 只加虚拟机层，签名出包 | `01-vm.apk` |
 | `ollvm` | 在 VM 之上叠加编译器层，重新出包 | `02-vm-ollvm.apk` |
 | `fog` | 以上一份**已签名**包为输入做收尾 | `03-vm-ollvm-fog.apk` |
-| `module` | 独立模块单独出包 | `04-module.apk` |
+| `xop` | 以上一份雾化包为输入再套一层壳（**可选**） | `04-vm-ollvm-fog-xop.apk` |
+| `module` | 独立模块单独出包 | `05-module.apk` |
 
-四份产物随后改名为 `<包名>-<版本>.apk` / `-ollvm` / `-fog` / `<模块包名>-<版本>.apk`，
-校验「恰好四份且摘要互不相同」后由 `5-upload.sh` 推到私有仓库的 Release。
+`xop` 阶段失败不会中断流水线：公开日志给一条 warning，其余产物照常上传（壳的兼容性风险
+比另外四个高，缺省当作可选变体）。四份核心产物随后改名为 `<包名>-<版本>.apk` / `-ollvm` /
+`-fog` / `<模块包名>-<版本>.apk`，成功时再加一份 `-fog-xop`；校验「至少四份、至多五份且摘要
+互不相同」后由 `5-upload.sh` 推到私有仓库的 Release。
 版本号由 `1-setup.sh` 依 tag 递增，`4-build.sh` 写回 Gradle 配置。
 
 阶段失败时公开日志只回显：失败阶段名、退出码、过滤后的任务名/错误标题行；
