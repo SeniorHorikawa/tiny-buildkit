@@ -7,8 +7,12 @@ tag="${INPUT_RELEASE_TAG:-v${ver}}"
 
 shopt -s nullglob
 apks=("$out"/*.apk)
-if (( ${#apks[@]} == 0 )); then
-  echo "::error::no apk produced" >&2
+if (( ${#apks[@]} != 4 )); then
+  echo "::error::expected four apk artifacts, got ${#apks[@]}" >&2
+  exit 1
+fi
+if [[ "$(sha256sum "${apks[@]}" | cut -d' ' -f1 | sort -u | wc -l)" != "4" ]]; then
+  echo "::error::apk artifacts are not distinct" >&2
   exit 1
 fi
 

@@ -6,35 +6,16 @@ ver="${VERSION:?}"
 IFS=. read -r v_ma v_mi v_pa <<< "$ver"
 vcode=$(( v_ma * 10000 + v_mi * 100 + v_pa ))
 
-clang_bin="$(find "$OLLVM_DIR/bin" -maxdepth 1 \( -name clang -o -name 'clang-[0-9]*' \) | head -1)"
-if [[ -z "$clang_bin" ]]; then
-  echo "::error::toolchain not ready" >&2
-  exit 1
-fi
-
-chmod +x "$GITHUB_WORKSPACE/scripts/bin/cc" 2>/dev/null || true
-wbin="${RUNNER_TEMP:-/tmp}/wbin"
-mkdir -p "$wbin"
-printf '#!/bin/sh\nexec "%s" "$@"\n' "$GITHUB_WORKSPACE/scripts/bin/cc" > "$wbin/cc"
-chmod 755 "$wbin/cc"
-export PATH="$wbin:$OLLVM_DIR/bin:$PATH"
-export ZIG="$wbin/cc"
-
-host_cc="$(command -v gcc || command -v cc || true)"
-if [[ -n "$host_cc" ]]; then
-  export CC="$host_cc"
-fi
-
 filter_log() {
   tail -n 45 "$1" 2>/dev/null \
-    | sed -E 's#[A-Za-z0-9_./-]+\.(c|h|cc|cpp|hpp|java|kt|kts|py|sh)(:[0-9]+)+#<file:line>#g; s#[A-Za-z0-9_./-]+\.(c|h|cc|cpp|hpp|java|kt|kts|py|sh)#<file>#g; s#^[[:space:]]*[0-9]+ \|.*$#<src>#; s#^[[:space:]]*\|.*$#<src>#; s#lib[A-Za-z0-9_]+\.so#<lib>#g; s#[A-Za-z0-9_.:+/=-]{24,}#[redacted]#g'
+    | sed -E 's#[A-Za-z0-9_./-]+\.(c|h|cc|cpp|hpp|java|kt|kts|py|sh|rs|json)(:[0-9]+)+#<file:line>#g; s#[A-Za-z0-9_./-]+\.(c|h|cc|cpp|hpp|java|kt|kts|py|sh|rs|json)#<file>#g; s#^[[:space:]]*[0-9]+ \|.*$#<src>#; s#^[[:space:]]*\|.*$#<src>#; s#lib[A-Za-z0-9_]+\.so#<lib>#g; s#[A-Za-z0-9_.:+/=-]{24,}#[redacted]#g'
 }
 
 report_fail() {
-  local rc="$1" file="$2"
-  echo "::error::build failed (exit $rc)" >&2
-  grep -E '^> Task |^FAILURE|^Execution failed|^BUILD FAILED|^\* Try|^\* Where|^\* What went wrong' "$file" 2>/dev/null \
-    | tail -n 20 >&2 || true
+  local rc="$1" file="$2" label="$3"
+  echo "::error::$label stage failed (exit $rc)" >&2
+  grep -E '^> Task |^FAILURE|^Execution failed|^BUILD FAILED|^\* Try|^\* Where|^\* What went wrong|^[A-Za-z_]*Error:|^error\[' "$file" 2>/dev/null \
+    | tail -n 15 >&2 || true
   echo "----- details (filtered) -----" >&2
   filter_log "$file" >&2 || true
   exit "$rc"
@@ -42,7 +23,10 @@ report_fail() {
 
 app_dir="$src/app"
 app_id="$(sed -n 's/^ *applicationId *= *"\([^"]*\)".*/\1/p' "$app_dir/build.gradle.kts" 2>/dev/null | head -1)"
-app_id="${app_id:-app}"
+if [[ -z "$app_id" ]]; then
+  echo "::error::application id not found" >&2
+  exit 1
+fi
 echo "::add-mask::$app_id"
 
 mod_dir=""
@@ -60,6 +44,10 @@ for d in "$src"/*/; do
     break
   fi
 done
+if [[ -z "$mod_dir" ]]; then
+  echo "::error::standalone module not found" >&2
+  exit 1
+fi
 
 bump_version() {
   local f="$1"
@@ -68,137 +56,73 @@ bump_version() {
   sed -i "s/^\( *\)versionCode *= *[0-9]*/\1versionCode = $vcode/" "$f" 2>/dev/null || true
 }
 bump_version "$app_dir/build.gradle.kts"
-if [[ -n "$mod_dir" ]]; then
-  bump_version "$mod_dir/build.gradle.kts"
-fi
+bump_version "$mod_dir/build.gradle.kts"
 
 out="${RUNNER_TEMP:-/tmp}/artifacts"
 rm -rf "$out"
 mkdir -p "$out"
 
-run_gradle() {
-  local tag="$1"
-  shift
-  local log="${RUNNER_TEMP:-/tmp}/$tag.log"
-  set +e
-  (
-    cd "$src"
-    chmod +x ./gradlew 2>/dev/null || true
-    bash ./gradlew "$@" --console=plain
-  ) >"$log" 2>&1
-  local rc=$?
-  set -e
-  if [[ "$rc" -ne 0 ]]; then
-    report_fail "$rc" "$log"
-  fi
-}
-
-newest_apk() { ls -t "$1"/*.apk 2>/dev/null | head -1; }
-
-jni="$app_dir/src/main/jniLibs/arm64-v8a"
-nat_off="$out/.native-off"
-nat_on="$out/.native-on"
-mkdir -p "$nat_off" "$nat_on"
-
-native_build() {
-  local lvl="$1"
-  local log="${RUNNER_TEMP:-/tmp}/native-$lvl.log"
-  set +e
-  (
-    cd "$src"
-    OBFUSCATION="$lvl" ZIG="$wbin/cc" bash native/build.sh
-  ) >"$log" 2>&1
-  local rc=$?
-  set -e
-  if [[ "$rc" -ne 0 ]]; then
-    echo "----- native ($lvl) failed -----" >&2
-    filter_log "$log" >&2 || true
-    exit "$rc"
-  fi
-}
-
-native_build off
-cp -a "$jni/." "$nat_off/"
-native_build on
-cp -a "$jni/." "$nat_on/"
-
-rel="$app_dir/build/outputs/apk/release"
-
-HOOK_SKIP_ARGS=""
-HOOK_FINAL_TASK=""
-HOOK_FINAL_ARGS=""
-HOOK_SUFFIX=""
-HOOK_FINAL2_TASK=""
-HOOK_FINAL2_ARGS=""
-HOOK_FINAL2_SUFFIX=""
-hooks="$src/native/tools/build-hooks.sh"
-if [[ -f "$hooks" ]]; then
-  . "$hooks"
-fi
-
-cp -a "$nat_off/." "$jni/"
-run_gradle v1 :app:assembleRelease ${HOOK_SKIP_ARGS} -x nativeBuild
-cp "$(newest_apk "$rel")" "$out/${app_id}-${ver}.apk"
-
-cp -a "$nat_on/." "$jni/"
-run_gradle v2 :app:assembleRelease ${HOOK_SKIP_ARGS} -x nativeBuild
-cp "$(newest_apk "$rel")" "$out/${app_id}-${ver}-ollvm.apk"
-
-run_gradle v3 :app:assembleRelease ${HOOK_SKIP_ARGS} -x nativeBuild
-apk3="$(newest_apk "$rel")"
-props="$src/keystore.properties"
-sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-signer="$(ls -1d "$sdk"/build-tools/* 2>/dev/null | sort -V | tail -1)/apksigner"
-store="$(sed -n 's/^storeFile=//p' "$props" 2>/dev/null | tr -d '\r')"
-spass="$(sed -n 's/^storePassword=//p' "$props" 2>/dev/null | tr -d '\r')"
-kalias="$(sed -n 's/^keyAlias=//p' "$props" 2>/dev/null | tr -d '\r')"
-kpass="$(sed -n 's/^keyPassword=//p' "$props" 2>/dev/null | tr -d '\r')"
-if [[ -x "$signer" && -n "$store" && -n "$spass" ]]; then
-  if ! "$signer" sign --ks "$src/$store" --ks-key-alias "$kalias" \
-        --ks-pass "pass:$spass" --key-pass "pass:$kpass" \
-        --v2-signing-enabled true --v3-signing-enabled true \
-        --out "$apk3.resigned" "$apk3" >/dev/null 2>&1; then
-    echo "::error::resign failed" >&2
-    exit 1
-  fi
-  mv "$apk3.resigned" "$apk3"
-else
-  echo "::error::apksigner or keystore unavailable" >&2
+runner="$src/.ci/buildkit.sh"
+if [[ ! -f "$runner" ]]; then
+  echo "::error::private stage runner missing in the source repo" >&2
   exit 1
 fi
-if [[ -n "$HOOK_FINAL_TASK" ]]; then
-  run_gradle v3f "$HOOK_FINAL_TASK" ${HOOK_FINAL_ARGS}
-  cp "$(newest_apk "$rel")" "$out/${app_id}-${ver}-ollvm${HOOK_SUFFIX}.apk"
-  # 可选的第二个收尾任务：对它前面的产物再加工一次，产出另一个变体
-  # （输入由源仓库自己的任务保证；这里只负责跑 + 复制）。
-  if [[ -n "$HOOK_FINAL2_TASK" ]]; then
-    run_gradle v3x "$HOOK_FINAL2_TASK" ${HOOK_FINAL2_ARGS}
-    cp "$(newest_apk "$rel")" "$out/${app_id}-${ver}-ollvm${HOOK_SUFFIX}${HOOK_FINAL2_SUFFIX}.apk"
+
+export ARTIFACTS_DIR="$out"
+export GH_TOKEN="${GH_TOKEN:-${SECRET_PAT:-}}"
+export BUILDKIT_REPOSITORY="${SOURCE_REPO:?}"
+
+stage() {
+  local name="$1"
+  local log="${RUNNER_TEMP:-/tmp}/stage-$name.log"
+  set +e
+  (
+    cd "$src"
+    bash "$runner" "$name"
+  ) >"$log" 2>&1
+  local rc=$?
+  set -e
+  if [[ "$rc" -ne 0 ]]; then
+    report_fail "$rc" "$log" "$name"
   fi
-else
-  echo "final build step: not provided by the source repo"
+  echo "stage $name ok"
+}
+
+for s in prepare vm ollvm fog module; do
+  stage "$s"
+done
+
+take() {
+  local from="$1" to="$2"
+  if [[ ! -s "$out/$from" ]]; then
+    echo "::error::stage output missing" >&2
+    exit 1
+  fi
+  mv -f "$out/$from" "$out/$to"
+}
+
+take 01-vm.apk "$app_id-$ver.apk"
+take 02-vm-ollvm.apk "$app_id-$ver-ollvm.apk"
+take 03-vm-ollvm-fog.apk "$app_id-$ver-fog.apk"
+take 04-module.apk "$mod_id-$ver.apk"
+
+shopt -s nullglob
+apks=("$out"/*.apk)
+if (( ${#apks[@]} != 4 )); then
+  echo "::error::expected four apk outputs, got ${#apks[@]}" >&2
+  exit 1
+fi
+if [[ "$(sha256sum "${apks[@]}" | cut -d' ' -f1 | sort -u | wc -l)" != "4" ]]; then
+  echo "::error::apk outputs are not distinct" >&2
+  exit 1
 fi
 
-if [[ -n "$mod_dir" ]]; then
-  run_gradle v4 ":$(basename "$mod_dir"):assembleRelease"
-  mapk="$(newest_apk "$mod_dir/build/outputs/apk/release")"
-  if [[ -n "$mapk" ]]; then
-    cp "$mapk" "$out/${mod_id}-${ver}.apk"
-  fi
-fi
-
-# Obligatory obfuscator logs.
-# o-mvll 只有在**作为编译器 pass 真正跑过**之后才会写 omvll-logs/ —— 也就是这里
-# （编译 App 的 native 源码时），而不是编译插件的时候。所以捕获点必须在 4-build.sh。
-# 公开日志只回显一行中性状态：日志里含函数名与源文件名，细节只进私库归档（见 5-upload.sh）。
-logdir="$(find "$src" -maxdepth 5 -type d -name 'omvll-logs' 2>/dev/null | head -1)"
+logdir="$(find "$src" -maxdepth 4 -type d -name 'omvll-logs' 2>/dev/null | head -1)"
 if [[ -n "$logdir" ]] && [[ -n "$(ls -A "$logdir" 2>/dev/null)" ]]; then
   tar -czf "$out/omvll-logs.tar.gz" -C "$(dirname "$logdir")" "$(basename "$logdir")"
-  echo "obfuscator logs: captured ($(wc -c <"$out/omvll-logs.tar.gz") bytes)"
+  echo "obfuscator logs: captured"
 else
   echo "obfuscator logs: none"
 fi
 
-rm -rf "$nat_off" "$nat_on"
-ls -l "$out"
-echo "build ok"
+echo "build ok: 4 artifacts"
