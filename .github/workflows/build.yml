@@ -89,3 +89,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.SRC_TOKEN || secrets.Actions }}
         run: bash scripts/5-upload.sh
+
+      - name: Diagnostics
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.SRC_TOKEN || secrets.Actions }}
+        run: bash scripts/diag.sh

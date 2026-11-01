@@ -75,6 +75,7 @@ export BUILDKIT_REPOSITORY="${SOURCE_REPO:?}"
 stage() {
   local name="$1"
   local log="${RUNNER_TEMP:-/tmp}/stage-$name.log"
+  echo "stage $name: start"
   set +e
   (
     cd "$src"
@@ -85,7 +86,7 @@ stage() {
   if [[ "$rc" -ne 0 ]]; then
     report_fail "$rc" "$log" "$name"
   fi
-  echo "stage $name ok"
+  echo "stage $name: done"
 }
 
 for s in prepare vm ollvm fog module; do
